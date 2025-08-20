@@ -1,0 +1,6 @@
+{
+  "name": "poe-api-backend",
+  "version": "1.0.0",
+  "description": "Poe API Backend for AI Assistant",
+  "type": "module"
+}
