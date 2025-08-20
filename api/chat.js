@@ -40,7 +40,7 @@ export default async function handler(req, res) {
                     role: "user", 
                     content: message.trim() 
                 }],
-                max_tokens: 1000,
+                max_tokens: 12000,
                 temperature: 0.7
             })
         });
