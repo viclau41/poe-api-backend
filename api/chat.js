@@ -23,10 +23,11 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: true, message: 'API key not configured' });
         }
 
-        console.log('Calling Poe API with model:', model);
+        console.log('Calling Poe API with OpenAI-compatible format...');
+        console.log('Model:', model);
 
-        // 调用真正的 Poe API
-        const response = await fetch('https://api.poe.com/v1/query', {
+        // 使用 OpenAI 兼容的格式调用 Poe API
+        const response = await fetch('https://api.poe.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
@@ -34,54 +35,62 @@ export default async function handler(req, res) {
                 'Accept': 'application/json'
             },
             body: JSON.stringify({
-                query: message.trim(),
-                bot: model
+                model: model,
+                messages: [{ 
+                    role: "user", 
+                    content: message.trim() 
+                }],
+                max_tokens: 1000,
+                temperature: 0.7
             })
         });
 
+        console.log('Response status:', response.status);
+
         if (!response.ok) {
-            console.error(`Poe API error: ${response.status}`);
             const errorText = await response.text();
-            console.error('Error details:', errorText);
+            console.error('Poe API error:', response.status, errorText);
             
-            // 如果主 API 失败，尝试备用格式
-            const fallbackResponse = await fetch('https://api.poe.com/bot', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    version: "1.0",
-                    type: "query",
-                    query: [{ role: "user", content: message.trim() }]
-                })
-            });
-
-            if (!fallbackResponse.ok) {
-                const fallbackError = await fallbackResponse.text();
-                throw new Error(`Both API endpoints failed. Status: ${response.status}, ${fallbackResponse.status}`);
+            // 如果是认证错误
+            if (response.status === 401) {
+                return res.status(500).json({
+                    error: true,
+                    message: 'API authentication failed. Please check your API key.'
+                });
             }
-
-            const fallbackData = await fallbackResponse.json();
-            return res.status(200).json({
-                success: true,
-                text: fallbackData.text || fallbackData.content || fallbackData.response || '抱歉，AI 暂时无法回复。',
-                model: model
-            });
+            
+            // 如果是模型不支持
+            if (response.status === 400) {
+                return res.status(500).json({
+                    error: true,
+                    message: `Model "${model}" may not be supported. Please try a different model.`
+                });
+            }
+            
+            throw new Error(`API request failed: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
         console.log('Poe API response received successfully');
 
+        // 提取回复内容
+        let responseText = '';
+        if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+            responseText = data.choices[0].message.content;
+        } else {
+            console.error('Unexpected response format:', JSON.stringify(data));
+            responseText = 'AI 回复格式异常，请稍后重试。';
+        }
+
         return res.status(200).json({
             success: true,
-            text: data.text || data.content || data.response || '抱歉，AI 暂时无法回复。',
-            model: model
+            text: responseText,
+            model: model,
+            usage: data.usage || null
         });
 
     } catch (error) {
-        console.error('Error in Poe API handler:', error);
+        console.error('Error in API handler:', error);
         return res.status(500).json({ 
             error: true, 
             message: 'Internal server error',
