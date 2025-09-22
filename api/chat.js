@@ -1,70 +1,85 @@
-//  /api/chat.js
+// 檔名: api/chat.js
+// 請將以下所有內容完整複製並取代你 GitHub 上的舊檔案內容
 
-// 引入你用嚟連接 Poe.com 嘅 library
-// 請確保你嘅 package.json 入面有 "poe-client"
-import Poe from 'poe-client';
-
-// 呢個係你原本用嚟處理 CORS 嘅 wrapper function，我哋會繼續用佢
-const allowCors = (fn) => async (req, res) => {
-    res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-control-Allow-Origin', '*'); 
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    // 瀏覽器會先用 OPTIONS 方法「打個招呼」，我哋要俾佢通過
-    if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
-    }
-    return await fn(req, res);
+export const config = {
+  runtime: 'edge',
 };
 
+export default async function handler(request) {
+  // --- CORS 歡迎通告 ---
+  // 我哋喺度明確話俾瀏覽器知，只允許你嘅風水網站嚟攞資料
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': 'https://victorlau.myqnapcloud.com',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
 
-// 呢個係處理請求嘅主要函數
-const handler = async (req, res) => {
-    // 我哋只處理 POST 請求
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
+  // 處理瀏覽器嘅「先行請求」(Preflight Request)，直接話俾佢知「無問題，你可以繼續」
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders,
+    });
+  }
+  // --- CORS 設定結束 ---
 
+
+  // --- 原有嘅 API 邏輯 ---
+  if (request.method === 'POST') {
     try {
-        // 【關鍵修改！】
-        // 我哋喺度由請求嘅 body 度，攞出個網站傳過嚟嘅 'message' 同 'model'
-        const { message, model } = req.body;
+      const { messages, bot_name } = await request.json();
+      const poeToken = process.env.POE_TOKEN;
 
-        // 如果個網站冇傳 'message' 過嚟，就話佢知個請求唔啱
-        if (!message) {
-            return res.status(400).json({ error: "請求內容必須包含 'message' 欄位。" });
-        }
+      if (!poeToken) {
+        return new Response(JSON.stringify({ error: '後端 POE_TOKEN 未設定' }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
-        // 初始化 Poe Client
-        // 重要：請確保你已經喺 Vercel 專案設定入面，加入咗 POE_TOKEN 環境變數
-        if (!process.env.POE_TOKEN) {
-             throw new Error("伺服器未設定 POE_TOKEN 環境變數。");
-        }
-        const client = new Poe({ token: process.env.POE_TOKEN });
+      const payload = {
+        model: bot_name || 'Claude-3-Haiku',
+        messages: messages,
+        stream: false,
+      };
 
-        // 決定用邊一個 bot，如果冇指定，就用 Claude-3-Haiku
-        const botName = model || 'Claude-3-Haiku';
+      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${poeToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
-        // 將個網站傳嚟嘅 `message` 字串，直接傳俾 Poe API
-        let replyText = '';
-        for await (const chunk of client.query(botName, message)) {
-            if (chunk.text_new) {
-                replyText += chunk.text_new;
-            }
-        }
-        
-        // 將 Poe AI 嘅完整回覆，用 JSON 格式傳返俾個網站
-        res.status(200).json({ text: replyText, reply: replyText });
+      if (!apiResponse.ok) {
+         const errorText = await apiResponse.text();
+         return new Response(JSON.stringify({ error: 'Poe API 請求失敗', details: errorText }), {
+          status: apiResponse.status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const responseData = await apiResponse.json();
+      const replyContent = responseData.choices[0].message.content;
+
+      // 喺成功回覆時，都附上「歡迎通告」
+      return new Response(JSON.stringify({ reply: replyContent }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
 
     } catch (error) {
-        // 如果中間出錯，回傳一個 500 錯誤俾前端
-        console.error("處理請求時發生錯誤:", error);
-        res.status(500).json({ error: `伺服器內部錯誤: ${error.message}` });
+      return new Response(JSON.stringify({ error: '後端內部伺服器錯誤' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
-};
+  }
 
-
-// 最後，將我哋嘅 handler 用 allowCors 包住再 export 出去
-export default allowCors(handler);
+  // 如果唔係 POST 或 OPTIONS 請求，就回覆唔允許
+  return new Response('方法不被允許', {
+    status: 405,
+    headers: { ...corsHeaders, 'Allow': 'POST, OPTIONS' },
+  });
+}
