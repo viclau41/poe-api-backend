@@ -3,10 +3,13 @@
 // 呢個函數專門用嚟設定 CORS 授權書 (headers)
 const allowCors = (fn) => async (req, res) => {
   res.setHeader('Access-Control-Allow-Credentials', true);
-  // 呢度係最重要嘅授權書，指明准許邊個網站嚟攞資料
-  res.setHeader('Access-Control-Allow-Origin', 'https://victorlau.myqnapcloud.com');
-  // 你亦可以暫時用 '*' 嚟允許任何網站，方便測試
-  // res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // --- 我哋嘅修改喺呢度 ---
+  // 我哋暫時將指定嘅網站註解咗 (前面加 //)
+  // res.setHeader('Access-Control-Allow-Origin', 'https://victorlau.myqnapcloud.com');
+  // 然後換成 '*'，代表允許來自任何網站嘅請求
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  // --- 修改完畢 ---
   
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
