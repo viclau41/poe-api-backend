@@ -1,45 +1,55 @@
 // 檔名: api/chat.js
-// 請將以下所有內容完整複製並取代你 GitHub 上的舊檔案內容
+// 這是最終的伺服器端程式碼，它會遷就舊的前端程式
 
 export const config = {
   runtime: 'edge',
 };
 
-export default async function handler(request) {
-  // --- CORS 歡迎通告 ---
-  // 我哋喺度明確話俾瀏覽器知，只允許你嘅風水網站嚟攞資料
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': 'https://victorlau.myqnapcloud.com',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
+// CORS 歡迎通告，允許你的風水網站和任何來源 (*) 進行測試
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*', // 改成 * 增加兼容性，允許任何網站呼叫
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
 
-  // 處理瀏覽器嘅「先行請求」(Preflight Request)，直接話俾佢知「無問題，你可以繼續」
+export default async function handler(request) {
+  // 處理瀏覽器的「先行請求」(Preflight Request)
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: corsHeaders,
     });
   }
-  // --- CORS 設定結束 ---
 
-
-  // --- 原有嘅 API 邏輯 ---
   if (request.method === 'POST') {
     try {
-      const { messages, bot_name } = await request.json();
-      const poeToken = process.env.POE_TOKEN;
+      // --- 改造點 1：接收舊格式的數據 ---
+      // 我們預期前端會傳來 { message: "...", model: "..." }
+      const clientData = await request.json();
+      const clientMessage = clientData.message; // 舊格式的 key 是 'message'
+      const clientModel = clientData.model;     // 舊格式的 key 是 'model'
 
-      if (!poeToken) {
-        return new Response(JSON.stringify({ error: '後端 POE_TOKEN 未設定' }), {
-          status: 500,
+      if (!clientMessage) {
+        return new Response(JSON.stringify({ error: '請求中缺少 "message" 內容' }), {
+          status: 400, // Bad Request
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const payload = {
-        model: bot_name || 'Claude-3-Haiku',
-        messages: messages,
+      const poeToken = process.env.POE_TOKEN;
+      if (!poeToken) {
+        throw new Error('後端 POE_TOKEN 未設定');
+      }
+
+      // --- 改造點 2：將舊格式翻譯成 Poe API 的新格式 ---
+      const payloadForPoe = {
+        model: clientModel || 'Claude-3-Haiku', // 如果前端有指定模型就用，否則用預設
+        messages: [
+          {
+            role: 'user',
+            content: clientMessage, // 將前端的 message 內容放入
+          },
+        ],
         stream: false,
       };
 
@@ -49,35 +59,38 @@ export default async function handler(request) {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadForPoe),
       });
 
       if (!apiResponse.ok) {
-         const errorText = await apiResponse.text();
-         return new Response(JSON.stringify({ error: 'Poe API 請求失敗', details: errorText }), {
-          status: apiResponse.status,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        const errorText = await apiResponse.text();
+        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
       const responseData = await apiResponse.json();
       const replyContent = responseData.choices[0].message.content;
 
-      // 喺成功回覆時，都附上「歡迎通告」
-      return new Response(JSON.stringify({ reply: replyContent }), {
+      // --- 改造點 3：將回覆包裝成舊前端想要的格式 ---
+      // 舊前端期望的 key 是 'text'
+      const responseForClient = {
+        text: replyContent,
+      };
+
+      return new Response(JSON.stringify(responseForClient), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ error: '後端內部伺服器錯誤' }), {
-        status: 500,
+      // 統一處理所有錯誤
+      return new Response(JSON.stringify({ text: `❌ 處理請求時發生錯誤：${error.message}` }), {
+        status: 500, // Internal Server Error
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
 
-  // 如果唔係 POST 或 OPTIONS 請求，就回覆唔允許
+  // 如果不是 POST 或 OPTIONS 請求，就回覆不允許
   return new Response('方法不被允許', {
     status: 405,
     headers: { ...corsHeaders, 'Allow': 'POST, OPTIONS' },
