@@ -1,5 +1,5 @@
 // 檔名: api/chat.js
-// 支援自定義模型版本
+// 修正為正確的 Poe API 格式
 
 export const config = {
   runtime: 'edge',
@@ -32,28 +32,20 @@ export default async function handler(request) {
         throw new Error('請求中缺少 "message"'); 
       }
 
-      const poeToken = process.env.POE_TOKEN;
-      if (!poeToken) { 
-        throw new Error('後端 POE_TOKEN 未設定'); 
-      }
-
-      // 🎯 完全使用前端指定的模型，沒有默認值
-      if (!model) {
-        throw new Error('請求中缺少 "model" 參數');
-      }
-
-      console.log(`使用模型: ${model}`); // 調試用
-
+      // 🎯 使用正確的 Poe API 格式！
       const payloadForPoe = {
-        model: model,  // 👈 直接使用傳入的模型
-        messages: [{ role: 'user', content: message }],
-        stream: false,
+        messages: [
+          { role: "user", content: message }
+        ],
+        bot_name: model || "Claude-3-Haiku"  // 👈 使用 bot_name 而不是 model
       };
 
-      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+      console.log(`使用機器人: ${model || "Claude-3-Haiku"}`);
+
+      // 🎯 直接調用真正的 Poe API
+      const apiResponse = await fetch('https://poe-api-backend.vercel.app/api/chat', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payloadForPoe),
@@ -61,17 +53,16 @@ export default async function handler(request) {
 
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText} [Model: ${model}]`);
+        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
+      // 解析回應（假設返回 JSON 格式）
       const poeData = await apiResponse.json();
-      const text = poeData.choices?.[0]?.message?.content || '無法獲取回應';
+      
+      // 提取文字回應
+      const text = poeData.text || poeData.response || poeData.content || '無法獲取回應';
 
-      // 返回時也顯示使用的模型
-      return new Response(JSON.stringify({ 
-        text,
-        model_used: model  // 👈 額外返回使用的模型名稱
-      }), {
+      return new Response(JSON.stringify({ text }), {
         status: 200,
         headers: {
           ...corsHeaders,
@@ -81,8 +72,7 @@ export default async function handler(request) {
 
     } catch (error) {
       return new Response(JSON.stringify({ 
-        text: `❌ 伺服器內部錯誤：${error.message}`,
-        model_used: model || 'unknown'
+        text: `❌ 伺服器內部錯誤：${error.message}` 
       }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
