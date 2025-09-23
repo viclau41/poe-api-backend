@@ -2,8 +2,11 @@ export const config = {
   runtime: 'edge',
 };
 
+// 🔒 加上域名保護
+const allowedOrigin = 'https://victorlau.myqnapcloud.com';
+
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',  // 暫時設為 * 確保能正常運作
+  'Access-Control-Allow-Origin': allowedOrigin,  // 限制只有您的網站能用
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -15,16 +18,11 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
-      // 🔍 收集調試信息
+      // 🔒 檢查請求來源
       const origin = request.headers.get('origin');
-      const host = request.headers.get('host');
-      const referer = request.headers.get('referer');
-      
-      console.log('=== 調試信息 ===');
-      console.log('Origin:', origin);
-      console.log('Host:', host);
-      console.log('Referer:', referer);
-      console.log('==================');
+      if (origin !== allowedOrigin) {
+        return new Response('Forbidden', { status: 403 });
+      }
       
       const requestData = await request.json();
       
@@ -70,11 +68,9 @@ export default async function handler(request) {
       const data = await apiResponse.json();
       const responseText = data.choices?.[0]?.message?.content || '無回應內容';
       
-      // 🔍 在回應中也包含調試信息
-      const debugInfo = `\n\n[調試信息] Origin: ${origin}, Host: ${host}`;
-      
+      // ✅ 移除調試信息，返回乾淨的回應
       return new Response(JSON.stringify({ 
-        text: responseText + debugInfo 
+        text: responseText 
       }), {
         status: 200,
         headers: { 
