@@ -1,13 +1,10 @@
 // 檔名: api/chat.js
-// 終極串流方案 (CORS 修正版)
+// 簡化版本 - 直接返回 JSON 格式
 
 export const config = {
   runtime: 'edge',
 };
 
-// 【【【 核心修正！ 】】】
-// 我哋唔再用 '*' (任何人)，而係明確指定只允許你嘅網站來源。
-// 呢個係最標準、最安全嘅做法。
 const allowedOrigin = 'https://victorlau.myqnapcloud.com';
 
 const corsHeaders = {
@@ -17,31 +14,34 @@ const corsHeaders = {
 };
 
 export default async function handler(request) {
-  // 處理瀏覽器發出嘅「preflight」OPTIONS 請求
-  // 呢個係解決 CORS 問題嘅關鍵一步！
+  // 處理 OPTIONS 請求
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      // 檢查請求來源係唔係被允許嘅
+      // 檢查來源
       const origin = request.headers.get('origin');
       if (origin !== allowedOrigin) {
-        // 如果唔係你嘅網站，就拒絕佢
         return new Response('Forbidden', { status: 403 });
       }
 
       const { message, model } = await request.json();
-      if (!message) { throw new Error('請求中缺少 "message"'); }
+      if (!message) { 
+        throw new Error('請求中缺少 "message"'); 
+      }
 
       const poeToken = process.env.POE_TOKEN;
-      if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
+      if (!poeToken) { 
+        throw new Error('後端 POE_TOKEN 未設定'); 
+      }
 
+      // 關鍵修正：改為非串流模式
       const payloadForPoe = {
         model: model || 'Claude-3-Haiku-20240307',
         messages: [{ role: 'user', content: message }],
-        stream: true,
+        stream: false,  // 👈 改為 false！
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -49,7 +49,6 @@ export default async function handler(request) {
         headers: {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
         },
         body: JSON.stringify(payloadForPoe),
       });
@@ -59,22 +58,33 @@ export default async function handler(request) {
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      // 將 Poe 嘅串流直接傳返俾你嘅網站，同時附上正確嘅 CORS 頭
-      return new Response(apiResponse.body, {
+      // 解析回應
+      const poeData = await apiResponse.json();
+      
+      // 提取文字內容
+      const text = poeData.choices?.[0]?.message?.content || '無法獲取回應';
+
+      // 返回前端期望的格式
+      return new Response(JSON.stringify({ text }), {
         status: 200,
         headers: {
-          ...corsHeaders, // 確保喺最終回應中都包含 CORS 頭
-          'Content-Type': 'text/event-stream; charset=utf-8',
+          ...corsHeaders,
+          'Content-Type': 'application/json',  // 👈 改為 JSON！
         },
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
+      return new Response(JSON.stringify({ 
+        text: `❌ 伺服器內部錯誤：${error.message}` 
+      }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
-  
-  return new Response('方法不被允許', { status: 405, headers: corsHeaders });
+
+  return new Response('Method Not Allowed', { 
+    status: 405, 
+    headers: corsHeaders 
+  });
 }
