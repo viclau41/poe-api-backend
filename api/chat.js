@@ -1,11 +1,13 @@
 // 檔名: api/chat.js
-// 終極串流方案 (優化版)
+// 終極串流方案 (CORS 修正版)
 
 export const config = {
   runtime: 'edge',
 };
 
-// 只允許您的網站來源
+// 【【【 核心修正！ 】】】
+// 我哋唔再用 '*' (任何人)，而係明確指定只允許你嘅網站來源。
+// 呢個係最標準、最安全嘅做法。
 const allowedOrigin = 'https://victorlau.myqnapcloud.com';
 
 const corsHeaders = {
@@ -15,52 +17,32 @@ const corsHeaders = {
 };
 
 export default async function handler(request) {
-  // 處理 CORS preflight 請求
+  // 處理瀏覽器發出嘅「preflight」OPTIONS 請求
+  // 呢個係解決 CORS 問題嘅關鍵一步！
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      // 檢查請求來源
+      // 檢查請求來源係唔係被允許嘅
       const origin = request.headers.get('origin');
       if (origin !== allowedOrigin) {
+        // 如果唔係你嘅網站，就拒絕佢
         return new Response('Forbidden', { status: 403 });
       }
 
       const { message, model } = await request.json();
-      if (!message) { 
-        return new Response(JSON.stringify({ text: '請求中缺少 "message" 參數' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+      if (!message) { throw new Error('請求中缺少 "message"'); }
 
       const poeToken = process.env.POE_TOKEN;
-      if (!poeToken) { 
-        return new Response(JSON.stringify({ text: '❌ 後端 POE_TOKEN 未設定，請聯繫管理員' }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      // 模型名稱映射（確保使用正確的 Poe API 模型名）
-      const modelMap = {
-        'Claude-3-Sonnet-20241022': 'Claude-3-Sonnet',
-        'Claude-3-Haiku-20240307': 'Claude-3-Haiku',
-        'Claude-3-Sonnet': 'Claude-3-Sonnet',
-        'Claude-3-Haiku': 'Claude-3-Haiku'
-      };
-
-      const poeModel = modelMap[model] || model || 'Claude-3-Haiku';
+      if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
 
       const payloadForPoe = {
-        model: poeModel,
+        model: model || 'Claude-3-Haiku-20240307',
         messages: [{ role: 'user', content: message }],
         stream: true,
       };
-
-      console.log('調用 Poe API:', { model: poeModel, messageLength: message.length });
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
         method: 'POST',
@@ -74,47 +56,25 @@ export default async function handler(request) {
 
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        console.error('Poe API 錯誤:', apiResponse.status, errorText);
-        
-        let userFriendlyError = '❌ AI 服務暫時不可用';
-        if (apiResponse.status === 401) {
-          userFriendlyError = '❌ AI 服務認證失敗，請聯繫管理員';
-        } else if (apiResponse.status === 429) {
-          userFriendlyError = '❌ 請求過於頻繁，請稍後重試';
-        } else if (apiResponse.status >= 500) {
-          userFriendlyError = '❌ AI 服務器錯誤，請稍後重試';
-        }
-        
-        return new Response(JSON.stringify({ text: userFriendlyError }), {
-          status: apiResponse.status,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      // 直接轉發 SSE 串流，並確保 CORS 頭存在
+      // 將 Poe 嘅串流直接傳返俾你嘅網站，同時附上正確嘅 CORS 頭
       return new Response(apiResponse.body, {
         status: 200,
         headers: {
-          ...corsHeaders,
+          ...corsHeaders, // 確保喺最終回應中都包含 CORS 頭
           'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
         },
       });
 
     } catch (error) {
-      console.error('API 處理錯誤:', error);
-      return new Response(JSON.stringify({ 
-        text: `❌ 伺服器內部錯誤：${error.message}` 
-      }), {
+      return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
   
-  return new Response('方法不被允許', { 
-    status: 405, 
-    headers: corsHeaders 
-  });
+  return new Response('方法不被允許', { status: 405, headers: corsHeaders });
 }
