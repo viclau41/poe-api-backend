@@ -3,8 +3,8 @@ export const config = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS', 
+  'Access-Control-Allow-Origin': '*',  // 暫時設為 * 確保能正常運作
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -15,6 +15,17 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
+      // 🔍 收集調試信息
+      const origin = request.headers.get('origin');
+      const host = request.headers.get('host');
+      const referer = request.headers.get('referer');
+      
+      console.log('=== 調試信息 ===');
+      console.log('Origin:', origin);
+      console.log('Host:', host);
+      console.log('Referer:', referer);
+      console.log('==================');
+      
       const requestData = await request.json();
       
       let message, model;
@@ -38,7 +49,7 @@ export default async function handler(request) {
       const payloadForPoe = {
         model: model || 'Claude-3-Haiku-20240307',
         messages: [{ role: 'user', content: message }],
-        stream: false,  // ⭐ 改為 false，返回普通JSON
+        stream: false,
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -46,7 +57,7 @@ export default async function handler(request) {
         headers: {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
-          'Accept': 'application/json',  // ⭐ 改為接受JSON
+          'Accept': 'application/json',
         },
         body: JSON.stringify(payloadForPoe),
       });
@@ -57,11 +68,14 @@ export default async function handler(request) {
       }
 
       const data = await apiResponse.json();
-      
-      // ⭐ 提取回應文本並返回符合前端期望的格式
       const responseText = data.choices?.[0]?.message?.content || '無回應內容';
       
-      return new Response(JSON.stringify({ text: responseText }), {
+      // 🔍 在回應中也包含調試信息
+      const debugInfo = `\n\n[調試信息] Origin: ${origin}, Host: ${host}`;
+      
+      return new Response(JSON.stringify({ 
+        text: responseText + debugInfo 
+      }), {
         status: 200,
         headers: { 
           ...corsHeaders, 
