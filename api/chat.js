@@ -1,5 +1,5 @@
 // 檔名: api/chat.js
-// 修正為正確的 Poe API 格式
+// 修正版：支援六壬程式的 JSON 格式
 
 export const config = {
   runtime: 'edge',
@@ -14,38 +14,42 @@ const corsHeaders = {
 };
 
 export default async function handler(request) {
-  // 處理 OPTIONS 請求
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      // 檢查來源
       const origin = request.headers.get('origin');
       if (origin !== allowedOrigin) {
         return new Response('Forbidden', { status: 403 });
       }
 
-      const { message, model } = await request.json();
-      if (!message) { 
-        throw new Error('請求中缺少 "message"'); 
+      const { message, model, messages } = await request.json();
+      
+      // 支援兩種格式：舊的 message 和新的 messages
+      let finalMessage;
+      if (messages) {
+        finalMessage = messages[0].content;  // 新格式
+      } else if (message) {
+        finalMessage = message;  // 舊格式
+      } else {
+        throw new Error('請求中缺少 "message" 或 "messages"');
       }
 
-      // 🎯 使用正確的 Poe API 格式！
+      const poeToken = process.env.POE_TOKEN;
+      if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
+
       const payloadForPoe = {
-        messages: [
-          { role: "user", content: message }
-        ],
-        bot_name: model || "Claude-3-Haiku"  // 👈 使用 bot_name 而不是 model
+        model: model || 'Claude-3-Haiku-20240307',
+        messages: [{ role: 'user', content: finalMessage }],
+        stream: false,  // 改為非串流模式，支援六壬程式
       };
 
-      console.log(`使用機器人: ${model || "Claude-3-Haiku"}`);
-
-      // 🎯 直接調用真正的 Poe API
-      const apiResponse = await fetch('https://poe-api-backend.vercel.app/api/chat', {
+      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payloadForPoe),
@@ -56,32 +60,24 @@ export default async function handler(request) {
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      // 解析回應（假設返回 JSON 格式）
-      const poeData = await apiResponse.json();
-      
-      // 提取文字回應
-      const text = poeData.text || poeData.response || poeData.content || '無法獲取回應';
+      const responseData = await apiResponse.json();
+      const replyContent = responseData.choices[0].message.content;
 
-      return new Response(JSON.stringify({ text }), {
+      // 返回六壬程式期望的格式
+      const responseForClient = { text: replyContent };
+
+      return new Response(JSON.stringify(responseForClient), {
         status: 200,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ 
-        text: `❌ 伺服器內部錯誤：${error.message}` 
-      }), {
+      return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
-
-  return new Response('Method Not Allowed', { 
-    status: 405, 
-    headers: corsHeaders 
-  });
+  
+  return new Response('方法不被允許', { status: 405, headers: corsHeaders });
 }
