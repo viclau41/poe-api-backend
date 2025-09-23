@@ -1,14 +1,14 @@
 // 檔名: api/chat.js
-// 最終方案：強化版「接力賽」模式，應對超時
+// 終極串流方案 (Streaming Version)
 
 export const config = {
   runtime: 'edge',
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://victorlau.myqnapcloud.com',
+  'Access-Control-Allow-Origin': '*', // 暫時用 * 確保連接性
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-control-allow-headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(request) {
@@ -18,10 +18,9 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
-      const clientData = await request.json();
-      let clientMessage = clientData.message;
+      const { message, model } = await request.json();
 
-      if (!clientMessage) {
+      if (!message) {
         return new Response(JSON.stringify({ error: '請求中缺少 "message" 內容' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -31,33 +30,14 @@ export default async function handler(request) {
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
 
-      // --- 強化版「接力賽」指示 ---
-      // 檢查用戶是否要求「繼續」，如果是，就給予不同指示
-      const isContinuation = clientMessage.includes('繼續') || clientMessage.includes('continue');
-      
-      let promptForAI;
-      if (isContinuation) {
-        // 如果是接力，就叫佢繼續深入
-        promptForAI = clientMessage + `
----
-[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。同樣地，將本次回答的長度控制在 2000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
-`;
-      } else {
-        // 如果是第一次提問，就叫佢先做初步分析
-        promptForAI = clientMessage + `
----
-[AI 內部指令]: 這是一個複雜的分析請求。你的任務是將完整的分析拆分成幾個部分。
-1.  **本次回答**：請先提供最核心的初步分析，長度約為 2000 字。
-2.  **引導繼續**：在回答的結尾，必須明確地、主動地詢問用戶是否需要繼續，例如：「以上是初步的核心分析。你需要我繼續深入探討三傳的細節和最終吉凶嗎？請回覆『繼續』。」
-`;
-      }
-      // --- 改造結束 ---
-
+      // 串流模式唔需要我哋手動加「接力賽」指令
+      // 因為數據係一路返，自然解決咗單次超時問題
       const payloadForPoe = {
-        model: clientData.model || 'Claude-3-Haiku',
-        messages: [{ role: 'user', content: promptForAI }],
-        stream: false,
-        max_tokens: 4500, // 預留足夠空間生成約 2000 漢字
+        model: model || 'Claude-3-Haiku', // 尊重前端選擇
+        messages: [{ role: 'user', content: message }],
+        // --- 【核心改動】---
+        stream: true, // 開啟串流模式！
+        // --------------------
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -65,6 +45,7 @@ export default async function handler(request) {
         headers: {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream', // 告訴 Poe 我哋要接收串流
         },
         body: JSON.stringify(payloadForPoe),
       });
@@ -74,18 +55,21 @@ export default async function handler(request) {
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      const responseData = await apiResponse.json();
-      const replyContent = responseData.choices[0].message.content;
-
-      const responseForClient = { text: replyContent };
-
-      return new Response(JSON.stringify(responseForClient), {
+      // 直接將 Poe 返回嘅串流數據，原封不動咁傳返俾前端
+      return new Response(apiResponse.body, {
         status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/event-stream; charset=utf-8', // 必須設定正確嘅 Content-Type
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ text: `❌ 處理請求時發生錯誤：${error.message}` }), {
+      console.error('[Vercel Log] Internal Handler Error:', error);
+      // 喺串流模式下，錯誤處理要更小心
+      return new Response(JSON.stringify({ text: `❌ 伺服器內部發生致命錯誤：${error.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
