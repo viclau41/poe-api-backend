@@ -1,63 +1,47 @@
 // 檔名: api/chat.js
-// 最終方案：強化版「接力賽」模式，應對超時
+// 終極串流方案 (CORS 修正版)
 
 export const config = {
   runtime: 'edge',
 };
 
+// 【【【 核心修正！ 】】】
+// 我哋唔再用 '*' (任何人)，而係明確指定只允許你嘅網站來源。
+// 呢個係最標準、最安全嘅做法。
+const allowedOrigin = 'https://victorlau.myqnapcloud.com';
+
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://victorlau.myqnapcloud.com',
+  'Access-Control-Allow-Origin': allowedOrigin,
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(request) {
+  // 處理瀏覽器發出嘅「preflight」OPTIONS 請求
+  // 呢個係解決 CORS 問題嘅關鍵一步！
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      const clientData = await request.json();
-      let clientMessage = clientData.message;
-
-      if (!clientMessage) {
-        return new Response(JSON.stringify({ error: '請求中缺少 "message" 內容' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+      // 檢查請求來源係唔係被允許嘅
+      const origin = request.headers.get('origin');
+      if (origin !== allowedOrigin) {
+        // 如果唔係你嘅網站，就拒絕佢
+        return new Response('Forbidden', { status: 403 });
       }
+
+      const { message, model } = await request.json();
+      if (!message) { throw new Error('請求中缺少 "message"'); }
 
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
 
-      // --- 強化版「接力賽」指示 ---
-      // 檢查用戶是否要求「繼續」，如果是，就給予不同指示
-      const isContinuation = clientMessage.includes('繼續') || clientMessage.includes('continue');
-      
-      let promptForAI;
-      if (isContinuation) {
-        // 如果是接力，就叫佢繼續深入
-        promptForAI = clientMessage + `
----
-[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。同樣地，將本次回答的長度控制在 2000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
-`;
-      } else {
-        // 如果是第一次提問，就叫佢先做初步分析
-        promptForAI = clientMessage + `
----
-[AI 內部指令]: 這是一個複雜的分析請求。你的任務是將完整的分析拆分成幾個部分。
-1.  **本次回答**：請先提供最核心的初步分析，長度約為 2000 字。
-2.  **引導繼續**：在回答的結尾，必須明確地、主動地詢問用戶是否需要繼續，例如：「以上是初步的核心分析。你需要我繼續深入探討三傳的細節和最終吉凶嗎？請回覆『繼續』。」
-`;
-      }
-      // --- 改造結束 ---
-
       const payloadForPoe = {
-        model: 'Claude-3-Haiku',
-        messages: [{ role: 'user', content: promptForAI }],
-        stream: false,
-        max_tokens: 3500, // 預留足夠空間生成約 2000 漢字
+        model: model || 'Claude-3-Haiku-20240307',
+        messages: [{ role: 'user', content: message }],
+        stream: true,
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -65,6 +49,7 @@ export default async function handler(request) {
         headers: {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
         },
         body: JSON.stringify(payloadForPoe),
       });
@@ -74,26 +59,22 @@ export default async function handler(request) {
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      const responseData = await apiResponse.json();
-      const replyContent = responseData.choices[0].message.content;
-
-      const responseForClient = { text: replyContent };
-
-      return new Response(JSON.stringify(responseForClient), {
+      // 將 Poe 嘅串流直接傳返俾你嘅網站，同時附上正確嘅 CORS 頭
+      return new Response(apiResponse.body, {
         status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders, // 確保喺最終回應中都包含 CORS 頭
+          'Content-Type': 'text/event-stream; charset=utf-8',
+        },
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ text: `❌ 處理請求時發生錯誤：${error.message}` }), {
+      return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
-
-  return new Response('方法不被允許', {
-    status: 405,
-    headers: { ...corsHeaders, 'Allow': 'POST, OPTIONS' },
-  });
+  
+  return new Response('方法不被允許', { status: 405, headers: corsHeaders });
 }
