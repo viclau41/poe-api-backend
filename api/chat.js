@@ -1,5 +1,5 @@
 // 檔名: api/chat.js
-// 簡化版本 - 直接返回 JSON 格式
+// 支援自定義模型版本
 
 export const config = {
   runtime: 'edge',
@@ -37,11 +37,17 @@ export default async function handler(request) {
         throw new Error('後端 POE_TOKEN 未設定'); 
       }
 
-      // 關鍵修正：改為非串流模式
+      // 🎯 完全使用前端指定的模型，沒有默認值
+      if (!model) {
+        throw new Error('請求中缺少 "model" 參數');
+      }
+
+      console.log(`使用模型: ${model}`); // 調試用
+
       const payloadForPoe = {
-        model: model || 'Claude-3-Haiku-20240307',
+        model: model,  // 👈 直接使用傳入的模型
         messages: [{ role: 'user', content: message }],
-        stream: false,  // 👈 改為 false！
+        stream: false,
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -55,27 +61,28 @@ export default async function handler(request) {
 
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
+        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText} [Model: ${model}]`);
       }
 
-      // 解析回應
       const poeData = await apiResponse.json();
-      
-      // 提取文字內容
       const text = poeData.choices?.[0]?.message?.content || '無法獲取回應';
 
-      // 返回前端期望的格式
-      return new Response(JSON.stringify({ text }), {
+      // 返回時也顯示使用的模型
+      return new Response(JSON.stringify({ 
+        text,
+        model_used: model  // 👈 額外返回使用的模型名稱
+      }), {
         status: 200,
         headers: {
           ...corsHeaders,
-          'Content-Type': 'application/json',  // 👈 改為 JSON！
+          'Content-Type': 'application/json',
         },
       });
 
     } catch (error) {
       return new Response(JSON.stringify({ 
-        text: `❌ 伺服器內部錯誤：${error.message}` 
+        text: `❌ 伺服器內部錯誤：${error.message}`,
+        model_used: model || 'unknown'
       }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
