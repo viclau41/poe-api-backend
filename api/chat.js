@@ -1,45 +1,53 @@
-// 檔名: api/chat.js
-// 終極串流方案 (CORS 修正版)
-
 export const config = {
   runtime: 'edge',
 };
 
-// 【【【 核心修正！ 】】】
-// 我哋唔再用 '*' (任何人)，而係明確指定只允許你嘅網站來源。
-// 呢個係最標準、最安全嘅做法。
-const allowedOrigin = 'https://victorlau.myqnapcloud.com';
-
+// 改回原來的開放設定
 const corsHeaders = {
-  'Access-Control-Allow-Origin': allowedOrigin,
+  'Access-Control-Allow-Origin': '*',        // ⭐ 改回 * 
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(request) {
-  // 處理瀏覽器發出嘅「preflight」OPTIONS 請求
-  // 呢個係解決 CORS 問題嘅關鍵一步！
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      // 檢查請求來源係唔係被允許嘅
-      const origin = request.headers.get('origin');
-      if (origin !== allowedOrigin) {
-        // 如果唔係你嘅網站，就拒絕佢
-        return new Response('Forbidden', { status: 403 });
+      // ⭐ 移除這段來源檢查：
+      // const origin = request.headers.get('origin');
+      // if (origin !== allowedOrigin) {
+      //   return new Response('Forbidden', { status: 403 });
+      // }
+
+      const requestData = await request.json();
+      
+      // 支援兩種格式
+      let message, model;
+      if (requestData.messages) {
+        message = requestData.messages[0]?.content;
+        model = requestData.bot_name;
+      } else {
+        message = requestData.message;
+        model = requestData.model;
       }
 
-      const { message, model } = await request.json();
-      if (!message) { throw new Error('請求中缺少 "message"'); }
+      if (!message) { 
+        throw new Error('請求中缺少 "message"'); 
+      }
 
       const poeToken = process.env.POE_TOKEN;
-      if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
+      if (!poeToken) { 
+        throw new Error('後端 POE_TOKEN 未設定'); 
+      }
+
+      // ⭐ 確保支援所有AI模型
+      const finalModel = model || 'Claude-3-Haiku-20240307';
 
       const payloadForPoe = {
-        model: model || 'Claude-3-Haiku-20240307',
+        model: finalModel,
         messages: [{ role: 'user', content: message }],
         stream: true,
       };
@@ -59,11 +67,10 @@ export default async function handler(request) {
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      // 將 Poe 嘅串流直接傳返俾你嘅網站，同時附上正確嘅 CORS 頭
       return new Response(apiResponse.body, {
         status: 200,
         headers: {
-          ...corsHeaders, // 確保喺最終回應中都包含 CORS 頭
+          ...corsHeaders,
           'Content-Type': 'text/event-stream; charset=utf-8',
         },
       });
