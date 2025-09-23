@@ -2,10 +2,9 @@ export const config = {
   runtime: 'edge',
 };
 
-// 改回原來的開放設定
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',        // ⭐ 改回 * 
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS', 
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -16,15 +15,8 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
-      // ⭐ 移除這段來源檢查：
-      // const origin = request.headers.get('origin');
-      // if (origin !== allowedOrigin) {
-      //   return new Response('Forbidden', { status: 403 });
-      // }
-
       const requestData = await request.json();
       
-      // 支援兩種格式
       let message, model;
       if (requestData.messages) {
         message = requestData.messages[0]?.content;
@@ -43,13 +35,10 @@ export default async function handler(request) {
         throw new Error('後端 POE_TOKEN 未設定'); 
       }
 
-      // ⭐ 確保支援所有AI模型
-      const finalModel = model || 'Claude-3-Haiku-20240307';
-
       const payloadForPoe = {
-        model: finalModel,
+        model: model || 'Claude-3-Haiku-20240307',
         messages: [{ role: 'user', content: message }],
-        stream: true,
+        stream: false,  // ⭐ 改為 false，返回普通JSON
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -57,7 +46,7 @@ export default async function handler(request) {
         headers: {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
+          'Accept': 'application/json',  // ⭐ 改為接受JSON
         },
         body: JSON.stringify(payloadForPoe),
       });
@@ -67,11 +56,16 @@ export default async function handler(request) {
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
-      return new Response(apiResponse.body, {
+      const data = await apiResponse.json();
+      
+      // ⭐ 提取回應文本並返回符合前端期望的格式
+      const responseText = data.choices?.[0]?.message?.content || '無回應內容';
+      
+      return new Response(JSON.stringify({ text: responseText }), {
         status: 200,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'text/event-stream; charset=utf-8',
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json' 
         },
       });
 
