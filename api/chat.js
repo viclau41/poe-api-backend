@@ -1,12 +1,13 @@
 // 檔名: api/chat.js
-// 最終方案：強化版「接力賽」模式，應對超時
+// 方案A：穩定版 + 模型選擇功能
 
 export const config = {
   runtime: 'edge',
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://victorlau.myqnapcloud.com',
+  // 我暫時用 '*' 確保你測試時唔會再有 CORS 錯誤，搞掂之後我哋可以改返做你嘅網址
+  'Access-Control-Allow-Origin': '*', 
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
@@ -18,8 +19,9 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
-      const clientData = await request.json();
-      let clientMessage = clientData.message;
+      // --- 【改造 1】 ---
+      // 由淨係攞 message，改成同時攞 message 同 model
+      const { message: clientMessage, model: clientModel } = await request.json();
 
       if (!clientMessage) {
         return new Response(JSON.stringify({ error: '請求中缺少 "message" 內容' }), {
@@ -31,33 +33,30 @@ export default async function handler(request) {
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
 
-      // --- 強化版「接力賽」指示 ---
-      // 檢查用戶是否要求「繼續」，如果是，就給予不同指示
       const isContinuation = clientMessage.includes('繼續') || clientMessage.includes('continue');
       
       let promptForAI;
       if (isContinuation) {
-        // 如果是接力，就叫佢繼續深入
         promptForAI = clientMessage + `
 ---
-[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。同樣地，將本次回答的長度控制在 2000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
+[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。將本次回答的長度控制在 2000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
 `;
       } else {
-        // 如果是第一次提問，就叫佢先做初步分析
         promptForAI = clientMessage + `
 ---
 [AI 內部指令]: 這是一個複雜的分析請求。你的任務是將完整的分析拆分成幾個部分。
 1.  **本次回答**：請先提供最核心的初步分析，長度約為 2000 字。
-2.  **引導繼續**：在回答的結尾，必須明確地、主動地詢問用戶是否需要繼續，例如：「以上是初步的核心分析。你需要我繼續深入探討三傳的細節和最終吉凶嗎？請回覆『繼續』。」
+2.  **引導繼續**：在回答的結尾，必須明確地、主動地詢問用戶是否需要繼續。
 `;
       }
-      // --- 改造結束 ---
 
       const payloadForPoe = {
-        model: 'Claude-3-Haiku',
+        // --- 【改造 2】 ---
+        // 如果前端有傳 model，就用前端嘅；如果冇，就預設用 Haiku
+        model: clientModel || 'Claude-3-Haiku', 
         messages: [{ role: 'user', content: promptForAI }],
         stream: false,
-        max_tokens: 2500, // 預留足夠空間生成約 2000 漢字
+        max_tokens: 2500,
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -77,9 +76,7 @@ export default async function handler(request) {
       const responseData = await apiResponse.json();
       const replyContent = responseData.choices[0].message.content;
 
-      const responseForClient = { text: replyContent };
-
-      return new Response(JSON.stringify(responseForClient), {
+      return new Response(JSON.stringify({ text: replyContent }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
