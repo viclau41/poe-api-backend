@@ -1,10 +1,11 @@
 // 檔名: api/chat.js
-// 修正版：支援六壬程式的 JSON 格式
+// 終極串流方案 (優化版)
 
 export const config = {
   runtime: 'edge',
 };
 
+// 只允許您的網站來源
 const allowedOrigin = 'https://victorlau.myqnapcloud.com';
 
 const corsHeaders = {
@@ -14,70 +15,106 @@ const corsHeaders = {
 };
 
 export default async function handler(request) {
+  // 處理 CORS preflight 請求
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
+      // 檢查請求來源
       const origin = request.headers.get('origin');
       if (origin !== allowedOrigin) {
         return new Response('Forbidden', { status: 403 });
       }
 
-      const { message, model, messages } = await request.json();
-      
-      // 支援兩種格式：舊的 message 和新的 messages
-      let finalMessage;
-      if (messages) {
-        finalMessage = messages[0].content;  // 新格式
-      } else if (message) {
-        finalMessage = message;  // 舊格式
-      } else {
-        throw new Error('請求中缺少 "message" 或 "messages"');
+      const { message, model } = await request.json();
+      if (!message) { 
+        return new Response(JSON.stringify({ text: '請求中缺少 "message" 參數' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
       const poeToken = process.env.POE_TOKEN;
-      if (!poeToken) { throw new Error('後端 POE_TOKEN 未設定'); }
+      if (!poeToken) { 
+        return new Response(JSON.stringify({ text: '❌ 後端 POE_TOKEN 未設定，請聯繫管理員' }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 模型名稱映射（確保使用正確的 Poe API 模型名）
+      const modelMap = {
+        'Claude-3-Sonnet-20241022': 'Claude-3-Sonnet',
+        'Claude-3-Haiku-20240307': 'Claude-3-Haiku',
+        'Claude-3-Sonnet': 'Claude-3-Sonnet',
+        'Claude-3-Haiku': 'Claude-3-Haiku'
+      };
+
+      const poeModel = modelMap[model] || model || 'Claude-3-Haiku';
 
       const payloadForPoe = {
-        model: model || 'Claude-3-Haiku-20240307',
-        messages: [{ role: 'user', content: finalMessage }],
-        stream: false,  // 改為非串流模式，支援六壬程式
+        model: poeModel,
+        messages: [{ role: 'user', content: message }],
+        stream: true,
       };
+
+      console.log('調用 Poe API:', { model: poeModel, messageLength: message.length });
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${poeToken}`,
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
         },
         body: JSON.stringify(payloadForPoe),
       });
 
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
+        console.error('Poe API 錯誤:', apiResponse.status, errorText);
+        
+        let userFriendlyError = '❌ AI 服務暫時不可用';
+        if (apiResponse.status === 401) {
+          userFriendlyError = '❌ AI 服務認證失敗，請聯繫管理員';
+        } else if (apiResponse.status === 429) {
+          userFriendlyError = '❌ 請求過於頻繁，請稍後重試';
+        } else if (apiResponse.status >= 500) {
+          userFriendlyError = '❌ AI 服務器錯誤，請稍後重試';
+        }
+        
+        return new Response(JSON.stringify({ text: userFriendlyError }), {
+          status: apiResponse.status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
-      const responseData = await apiResponse.json();
-      const replyContent = responseData.choices[0].message.content;
-
-      // 返回六壬程式期望的格式
-      const responseForClient = { text: replyContent };
-
-      return new Response(JSON.stringify(responseForClient), {
+      // 直接轉發 SSE 串流，並確保 CORS 頭存在
+      return new Response(apiResponse.body, {
         status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
+      console.error('API 處理錯誤:', error);
+      return new Response(JSON.stringify({ 
+        text: `❌ 伺服器內部錯誤：${error.message}` 
+      }), {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
   }
   
-  return new Response('方法不被允許', { status: 405, headers: corsHeaders });
+  return new Response('方法不被允許', { 
+    status: 405, 
+    headers: corsHeaders 
+  });
 }
