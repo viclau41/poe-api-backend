@@ -40,14 +40,14 @@ export default async function handler(request) {
         // 如果是接力，就叫佢繼續深入
         promptForAI = clientMessage + `
 ---
-[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。同樣地，將本次回答的長度控制在 2000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
+[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。同樣地，將本次回答的長度控制在 3000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
 `;
       } else {
         // 如果是第一次提問，就叫佢先做初步分析
         promptForAI = clientMessage + `
 ---
 [AI 內部指令]: 這是一個複雜的分析請求。你的任務是將完整的分析拆分成幾個部分。
-1.  **本次回答**：請先提供最核心的初步分析，長度約為 2000 字。
+1.  **本次回答**：請先提供最核心的初步分析，長度約為 3000 字。
 2.  **引導繼續**：在回答的結尾，必須明確地、主動地詢問用戶是否需要繼續，例如：「以上是初步的核心分析。你需要我繼續深入探討三傳的細節和最終吉凶嗎？請回覆『繼續』。」
 `;
       }
@@ -57,7 +57,7 @@ export default async function handler(request) {
         model: 'Claude-3-Haiku',
         messages: [{ role: 'user', content: promptForAI }],
         stream: false,
-        max_tokens: 2500, // 預留足夠空間生成約 2000 漢字
+        max_tokens: 3500, // 預留足夠空間生成約 3000 漢字
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
