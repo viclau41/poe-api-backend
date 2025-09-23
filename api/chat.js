@@ -40,13 +40,13 @@ export default async function handler(request) {
       if (isContinuation) {
         promptForAI = clientMessage + `
 ---
-[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。將本次回答的長度控制在 2000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
+[AI 內部指令]: 請基於以上對話，繼續進行下一步的深入分析。將本次回答的長度控制在 4000 字左右。如果還有內容未完成，請在結尾再次引導用戶繼續提問。
 `;
       } else {
         promptForAI = clientMessage + `
 ---
 [AI 內部指令]: 這是一個複雜的分析請求。你的任務是將完整的分析拆分成幾個部分來回答。
-1.  **本次回答**：請先提供最核心的初步分析，長度約為 2000 字。
+1.  **本次回答**：請先提供最核心的初步分析，長度約為 4000 字。
 2.  **引導繼續**：在回答的結尾，你必須明確地、主動地詢問用戶是否需要繼續，例如：「以上是初步的核心分析。你需要我繼續深入探討嗎？請回覆『繼續』。」
 `;
       }
@@ -55,7 +55,7 @@ export default async function handler(request) {
         model: clientModel || 'Claude-3-Haiku', // 尊重前端選擇，若無則預設 Haiku
         messages: [{ role: 'user', content: promptForAI }],
         stream: false,
-        max_tokens: 2500,
+        max_tokens: 4500,
       };
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
