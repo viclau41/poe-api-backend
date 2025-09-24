@@ -10,31 +10,39 @@ const keyMap = {
   '61883889': 'phone',
 };
 
+// 🔧 確保所有響應都有完整的 CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+  'Access-Control-Max-Age': '86400', // 24小時
 };
 
 export default async function handler(request) {
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
+  try {
+    // 處理 OPTIONS 預檢請求
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { 
+        status: 204, 
+        headers: corsHeaders 
+      });
+    }
 
-  // 添加 GET 支持用於測試
-  if (request.method === 'GET') {
-    return new Response(JSON.stringify({
-      status: 'Victor API Working',
-      timestamp: new Date().toISOString(),
-      poeToken: process.env.POE_TOKEN ? 'Configured' : 'Not Set'
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
+    // 處理 GET 請求（測試用）
+    if (request.method === 'GET') {
+      return new Response(JSON.stringify({
+        status: '✅ Victor API 運行中',
+        timestamp: new Date().toISOString(),
+        poeToken: process.env.POE_TOKEN ? '✅ 已設定' : '❌ 未設定',
+        allowedOrigin: 'https://victorlau.myqnapcloud.com'
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
-  if (request.method === 'POST') {
-    try {
+    // 處理 POST 請求
+    if (request.method === 'POST') {
       const origin = request.headers.get('origin');
       const apiKey = request.headers.get('x-api-key');
       
@@ -44,19 +52,29 @@ export default async function handler(request) {
       
       if (!validOrigin && !validKey) {
         return new Response(JSON.stringify({ 
-          text: 'Access Forbidden' 
+          text: '❌ 訪問被拒絕：無效來源或密鑰' 
         }), { 
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
       
-      // 記錄訪問（如果使用密鑰）
+      // 記錄訪問
       if (validKey) {
-        console.log(`Access granted with key: ${keyMap[apiKey]}`);
+        console.log(`API 訪問：密鑰 ${apiKey} (${keyMap[apiKey]})`);
       }
       
-      const requestData = await request.json();
+      let requestData;
+      try {
+        requestData = await request.json();
+      } catch (parseError) {
+        return new Response(JSON.stringify({ 
+          text: '❌ 請求格式錯誤：無效的 JSON' 
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
       
       let message, model;
       if (requestData.messages) {
@@ -68,12 +86,22 @@ export default async function handler(request) {
       }
 
       if (!message) { 
-        throw new Error('Missing message in request'); 
+        return new Response(JSON.stringify({ 
+          text: '❌ 缺少必要參數：message' 
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { 
-        throw new Error('POE_TOKEN not configured'); 
+        return new Response(JSON.stringify({ 
+          text: '❌ 服務配置錯誤：POE_TOKEN 未設定' 
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
       const payloadForPoe = {
@@ -82,48 +110,62 @@ export default async function handler(request) {
         stream: false,
       };
 
-      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${poeToken}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(payloadForPoe),
-      });
+      try {
+        const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${poeToken}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify(payloadForPoe),
+        });
 
-      if (!apiResponse.ok) {
-        const errorText = await apiResponse.text();
-        throw new Error(`Poe API failed (${apiResponse.status}): ${errorText}`);
+        if (!apiResponse.ok) {
+          const errorText = await apiResponse.text();
+          throw new Error(`Poe API 錯誤 (${apiResponse.status}): ${errorText.substring(0, 200)}`);
+        }
+
+        const data = await apiResponse.json();
+        const responseText = data.choices?.[0]?.message?.content || '❌ AI 未提供有效回應';
+        
+        return new Response(JSON.stringify({ 
+          text: responseText 
+        }), {
+          status: 200,
+          headers: { 
+            ...corsHeaders, 
+            'Content-Type': 'application/json' 
+          },
+        });
+
+      } catch (apiError) {
+        console.error('Poe API 錯誤:', apiError);
+        return new Response(JSON.stringify({ 
+          text: `❌ AI 服務暫時不可用: ${apiError.message}` 
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
-
-      const data = await apiResponse.json();
-      const responseText = data.choices?.[0]?.message?.content || 'No response content';
-      
-      return new Response(JSON.stringify({ 
-        text: responseText 
-      }), {
-        status: 200,
-        headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'application/json' 
-        },
-      });
-
-    } catch (error) {
-      return new Response(JSON.stringify({ 
-        text: `Server error: ${error.message}` 
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
     }
+    
+    // 不支持的 HTTP 方法
+    return new Response(JSON.stringify({
+      text: '❌ 不支持的請求方法'
+    }), { 
+      status: 405, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+
+  } catch (globalError) {
+    // 🔧 全域錯誤處理，確保始終有 CORS headers
+    console.error('全域錯誤:', globalError);
+    return new Response(JSON.stringify({
+      text: `❌ 服務器內部錯誤: ${globalError.message}`
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
   }
-  
-  return new Response(JSON.stringify({
-    text: 'Method not allowed'
-  }), { 
-    status: 405, 
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-  });
 }
