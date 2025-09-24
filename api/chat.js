@@ -9,11 +9,11 @@ export default async function handler(request) {
   }
 
   if (request.method === 'POST') {
-    // 模擬處理時間
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    const body = await request.json();
+    const message = body.messages?.[0]?.content || body.message || '測試';
     
     return new Response(JSON.stringify({
-      text: '✅ API 基礎測試成功！這是測試回應。'
+      text: `✅ API 連接成功！收到您的訊息：${message}`
     }), { status: 200, headers });
   }
 
