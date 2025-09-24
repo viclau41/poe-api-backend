@@ -13,52 +13,69 @@ export default async function handler(req, res) {
   
   if (method === 'GET') {
     return res.status(200).json({
-      status: '✅ API 運行中',
+      status: '✅ Victor API 運行中',
       timestamp: new Date().toISOString(),
-      poeToken: process.env.POE_TOKEN ? '✅ 已設定' : '❌ 未設定',
-      tokenLength: process.env.POE_TOKEN ? process.env.POE_TOKEN.length : 0
+      poeToken: process.env.POE_TOKEN ? '✅ 已設定' : '❌ 未設定'
     });
   }
   
   if (method === 'POST') {
     try {
-      console.log('📝 POST 請求開始', { body: req.body });
-      
       const { message, model } = req.body || {};
       
       if (!message) {
-        console.log('❌ 缺少 message');
         return res.status(400).json({ text: '❌ 缺少 message' });
       }
 
       const poeToken = process.env.POE_TOKEN;
-      console.log('🔑 POE_TOKEN 檢查:', { 
-        exists: !!poeToken, 
-        length: poeToken ? poeToken.length : 0 
-      });
-
       if (!poeToken) {
-        console.log('❌ POE_TOKEN 未設定');
-        return res.status(500).json({ 
-          text: '❌ POE_TOKEN 環境變數未設定' 
-        });
+        return res.status(500).json({ text: '❌ POE_TOKEN 未設定' });
       }
 
-      // 🔧 暫時返回調試信息，不調用真正的 Poe API
-      console.log('✅ 準備調用 Poe API');
+      // 準備 Poe API 請求
+      const payloadForPoe = {
+        model: model || 'Claude-3-Haiku-20240307',
+        messages: [{ role: 'user', content: message }],
+        stream: false,
+      };
+
+      console.log('🚀 調用 Poe API...', { 
+        model: payloadForPoe.model,
+        messageLength: message.length 
+      });
+
+      // 🚀 真正調用 Poe API
+      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${poeToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(payloadForPoe),
+      });
+
+      if (!apiResponse.ok) {
+        const errorText = await apiResponse.text();
+        console.error('❌ Poe API 錯誤:', apiResponse.status, errorText);
+        throw new Error(`Poe API 錯誤 (${apiResponse.status}): ${errorText.substring(0, 200)}`);
+      }
+
+      const data = await apiResponse.json();
+      const responseText = data.choices?.[0]?.message?.content || '❌ AI 未提供有效回應';
+      
+      console.log('✅ AI 回應成功，長度:', responseText.length);
       
       return res.status(200).json({
-        text: `🔧 調試模式：收到訊息「${message.substring(0, 50)}」，POE_TOKEN 已設定（長度：${poeToken.length}），準備調用模型：${model || 'gpt-5-mini'}`,
-        debug: true,
-        poeTokenSet: true,
-        messageLength: message.length
+        text: responseText,
+        model: payloadForPoe.model,
+        timestamp: new Date().toISOString()
       });
       
     } catch (error) {
-      console.error('❌ 捕獲錯誤:', error);
+      console.error('❌ API 錯誤:', error.message);
       return res.status(500).json({
-        text: `❌ 錯誤：${error.message}`,
-        stack: error.stack
+        text: `❌ AI 服務暫時不可用：${error.message}`
       });
     }
   }
