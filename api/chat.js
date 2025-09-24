@@ -1,96 +1,79 @@
-// v4 - 修正語法錯誤並簡化日誌，使用純英文避免任何編碼問題
+export default async function handler(req, res) {
+  // --- START: CORS Preflight & Headers ---
+  // 設置允許跨域請求的來源。'*' 代表允許任何來源，開發時最方便。
+  res.setHeader('Access-Control-Allow-Origin', '*'); 
+  // 設置允許的 HTTP 方法
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  // 設置允許的請求標頭
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
-};
-
-export default async function handler(request, response) {
-  // 處理 OPTIONS 請求
-  if (request.method === 'OPTIONS') {
-    response.status(204).send(null);
+  // 處理瀏覽器的 "preflight" 預檢請求 (OPTIONS method)
+  // 這是瀏覽器在發送 POST 請求前，先來問路確認安唔安全
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
     return;
   }
+  // --- END: CORS Preflight & Headers ---
 
-  // 處理 POST 請求
-  if (request.method === 'POST') {
-    // --- Log Point 1: Check if function is triggered ---
-    console.log('--- Received POST request, function started ---');
+  // --- 以下是你原本的 API 邏輯 ---
+  const { message, model, bot_name, messages } = req.body;
+  const apiKey = req.headers['x-api-key'];
 
-    try {
-      // --- Log Point 2: Check the incoming request body ---
-      console.log('Request Body Content:', JSON.stringify(request.body, null, 2));
-      const requestData = request.body;
-      
-      let message, model;
-      if (requestData.messages) {
-        message = requestData.messages[0]?.content;
-        model = requestData.bot_name;
-      } else {
-        message = requestData.message;
-        model = requestData.model;
-      }
+  // 密鑰驗證邏輯
+  const POE_API_KEY_MAP = {
+    '529': process.env.POE_API_KEY_FOR_529, // Victor 的密鑰
+    // 在這裡可以添加更多密鑰
+  };
 
-      // --- Log Point 3: Check if the message variable was parsed correctly ---
-      console.log('Parsed Message:', message);
+  const poeApiKey = POE_API_KEY_MAP[apiKey];
 
-      if (!message) { 
-        console.error('ERROR: Message is empty, preparing to throw error.');
-        throw new Error('Request is missing "message" content'); 
-      }
+  if (!poeApiKey) {
+    return res.status(401).json({ text: '❌ 錯誤：無效的 API 密鑰。' });
+  }
 
-      // --- Log Point 4: Check if POE_TOKEN can be read ---
-      console.log('Preparing to read POE_TOKEN...');
-      const poeToken = process.env.POE_TOKEN;
-      // ⭐⭐⭐ 呢度係之前出錯嘅地方，我哋已經將佢簡化 ⭐⭐⭐
-      console.log('POE_TOKEN status:', poeToken ? 'Found! Length: ' + poeToken.length : 'NOT FOUND! It is null or undefined!');
+  // 確定要使用的 bot
+  // 如果前端指定了 bot_name，就用佢，否則根據密鑰決定
+  const targetBot = bot_name || (apiKey === '529' ? 'Claude-3-Haiku' : 'Gemma-2-9b-It');
 
-      if (!poeToken) { 
-        console.error('ERROR: POE_TOKEN is empty, preparing to throw error.');
-        throw new Error('Backend Error: POE_TOKEN is not set in Vercel environment variables'); 
-      }
+  // 準備發送到 Poe 的數據
+  const requestData = {
+    // Poe API v2 期待一個 `query` 數組
+    query: messages || [
+      {
+        role: "user",
+        content: message,
+      },
+    ],
+    bot: targetBot,
+    // 其他可能需要的參數
+  };
 
-      const payloadForPoe = {
-        model: model || 'Claude-3-Haiku-20240307',
-        messages: [{ role: 'user', content: message }],
-        stream: false,
-      };
+  try {
+    const response = await fetch('https://api.poe.com/v2/chat/new', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${poeApiKey}`,
+      },
+      body: JSON.stringify(requestData),
+    });
 
-      // --- Log Point 5: Check the data being sent to Poe ---
-      console.log('Payload to be sent to Poe API:', JSON.stringify(payloadForPoe, null, 2));
-
-      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${poeToken}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(payloadForPoe),
-      });
-
-      console.log('Received response from Poe API, Status:', apiResponse.status);
-
-      if (!apiResponse.ok) {
-        const errorText = await apiResponse.text();
-        console.error('Poe API returned an error:', errorText);
-        throw new Error(`Poe API request failed (${apiResponse.status}): ${errorText}`);
-      }
-
-      const data = await apiResponse.json();
-      const responseText = data.choices?.[0]?.message?.content || 'Poe API did not return valid content';
-      
-      console.log('--- Request successful, preparing to send response ---');
-      response.status(200).json({ text: responseText });
-
-    } catch (error) {
-      // --- Log Point 6: If any step above fails, it will be caught here ---
-      console.error('--- CRITICAL ERROR CAUGHT IN CATCH BLOCK ---', error);
-      response.status(500).json({ text: `❌ Server Internal Error: ${error.message}` });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Poe API Error:', errorText);
+      // 將 Poe 返回的錯誤信息傳遞給前端
+      return res.status(response.status).json({ text: `❌ Poe API 錯誤: ${errorText}` });
     }
-    return;
+
+    const data = await response.json();
+    // Poe v2 API 的回應格式可能唔同，需要根據實際情況調整
+    // 假設成功的回應在 data.text 或類似的欄位
+    const replyText = data.text || JSON.stringify(data); // 如果沒有 text 欄位，就返回整個 JSON
+
+    res.status(200).json({ text: replyText });
+
+  } catch (error) {
+    console.error('Internal Server Error:', error);
+    res.status(500).json({ text: `❌ 伺服器內部錯誤: ${error.message}` });
   }
-  
-  response.status(405).json({ text: 'Method Not Allowed' });
 }
