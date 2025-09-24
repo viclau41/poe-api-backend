@@ -10,14 +10,8 @@ export default async function handler(request) {
     return new Response(null, { status: 200, headers });
   }
 
-  if (request.method === 'GET') {
-    return new Response(JSON.stringify({
-      status: 'API Working',
-      timestamp: new Date().toISOString()
-    }), { status: 200, headers });
-  }
-
+  // 臨時返回固定響應
   return new Response(JSON.stringify({
-    error: 'Method not allowed'
-  }), { status: 405, headers });
+    text: '✅ Victor API 臨時離線維護中，請使用內置分析功能'
+  }), { status: 200, headers });
 }
