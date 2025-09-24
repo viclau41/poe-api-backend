@@ -1,9 +1,10 @@
 {
   "functions": {
     "api/chat.js": {
-      "runtime": "edge"
+      "runtime": "nodejs18.x"
     }
-  },
+  }
+}
   "headers": [
     {
       "source": "/api/chat",
