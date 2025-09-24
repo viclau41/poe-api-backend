@@ -1,4 +1,4 @@
-// 標準 Node.js 環境
+// v4 - 修正語法錯誤並簡化日誌，使用純英文避免任何編碼問題
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,12 +15,12 @@ export default async function handler(request, response) {
 
   // 處理 POST 請求
   if (request.method === 'POST') {
-    // --- 診斷點 1：檢查函數有冇被觸發 ---
-    console.log('--- 收到 POST 請求，函數開始執行 ---');
+    // --- Log Point 1: Check if function is triggered ---
+    console.log('--- Received POST request, function started ---');
 
     try {
-      // --- 診斷點 2：檢查傳入嘅 request.body 係咩 ---
-      console.log('Request Body 內容:', JSON.stringify(request.body, null, 2));
+      // --- Log Point 2: Check the incoming request body ---
+      console.log('Request Body Content:', JSON.stringify(request.body, null, 2));
       const requestData = request.body;
       
       let message, model;
@@ -32,22 +32,23 @@ export default async function handler(request, response) {
         model = requestData.model;
       }
 
-      // --- 診斷點 3：檢查 message 變數有冇成功攞到值 ---
-      console.log('解析到嘅 Message:', message);
+      // --- Log Point 3: Check if the message variable was parsed correctly ---
+      console.log('Parsed Message:', message);
 
       if (!message) { 
-        console.error('錯誤：Message 為空，準備拋出錯誤。');
-        throw new Error('請求中缺少 "message" 內容'); 
+        console.error('ERROR: Message is empty, preparing to throw error.');
+        throw new Error('Request is missing "message" content'); 
       }
 
-      // --- 診斷點 4：檢查 POE_TOKEN 能否被讀取 ---
-      console.log('準備讀取 POE_TOKEN...');
+      // --- Log Point 4: Check if POE_TOKEN can be read ---
+      console.log('Preparing to read POE_TOKEN...');
       const poeToken = process.env.POE_TOKEN;
-      console.log('讀取到嘅 POE_TOKEN:', poeToken ? '成功讀取到！(長度: ' + poeToken.length + ')' : '失敗！係空值！');
+      // ⭐⭐⭐ 呢度係之前出錯嘅地方，我哋已經將佢簡化 ⭐⭐⭐
+      console.log('POE_TOKEN status:', poeToken ? 'Found! Length: ' + poeToken.length : 'NOT FOUND! It is null or undefined!');
 
       if (!poeToken) { 
-        console.error('錯誤：POE_TOKEN 為空，準備拋出錯誤。');
-        throw new Error('後端錯誤：POE_TOKEN 未在 Vercel 環境變數中設定'); 
+        console.error('ERROR: POE_TOKEN is empty, preparing to throw error.');
+        throw new Error('Backend Error: POE_TOKEN is not set in Vercel environment variables'); 
       }
 
       const payloadForPoe = {
@@ -56,8 +57,8 @@ export default async function handler(request, response) {
         stream: false,
       };
 
-      // --- 診斷點 5：檢查準備發送去 Poe 嘅資料 ---
-      console.log('準備向 Poe API 發送請求，Payload:', JSON.stringify(payloadForPoe, null, 2));
+      // --- Log Point 5: Check the data being sent to Poe ---
+      console.log('Payload to be sent to Poe API:', JSON.stringify(payloadForPoe, null, 2));
 
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
         method: 'POST',
@@ -69,27 +70,27 @@ export default async function handler(request, response) {
         body: JSON.stringify(payloadForPoe),
       });
 
-      console.log('已收到 Poe API 嘅回應，狀態:', apiResponse.status);
+      console.log('Received response from Poe API, Status:', apiResponse.status);
 
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        console.error('Poe API 返回錯誤:', errorText);
-        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
+        console.error('Poe API returned an error:', errorText);
+        throw new Error(`Poe API request failed (${apiResponse.status}): ${errorText}`);
       }
 
       const data = await apiResponse.json();
-      const responseText = data.choices?.[0]?.message?.content || 'Poe API 未返回有效內容';
+      const responseText = data.choices?.[0]?.message?.content || 'Poe API did not return valid content';
       
-      console.log('--- 請求成功，準備返回結果 ---');
+      console.log('--- Request successful, preparing to send response ---');
       response.status(200).json({ text: responseText });
 
     } catch (error) {
-      // --- 診斷點 6：如果中間任何一步出錯，就會嚟到呢度 ---
-      console.error('--- 捕獲到嚴重錯誤 (catch block) ---', error);
-      response.status(500).json({ text: `❌ 伺服器內部錯誤：${error.message}` });
+      // --- Log Point 6: If any step above fails, it will be caught here ---
+      console.error('--- CRITICAL ERROR CAUGHT IN CATCH BLOCK ---', error);
+      response.status(500).json({ text: `❌ Server Internal Error: ${error.message}` });
     }
     return;
   }
   
-  response.status(405).json({ text: '方法不被允許' });
+  response.status(405).json({ text: 'Method Not Allowed' });
 }
