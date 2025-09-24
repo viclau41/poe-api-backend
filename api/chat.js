@@ -1,4 +1,4 @@
-export default function handler(req, res) {
+export default async function handler(req, res) {
   // 🔧 設置 CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -31,17 +31,56 @@ export default function handler(req, res) {
           text: '❌ 缺少必要參數：message' 
         });
       }
+
+      // 檢查 POE_TOKEN
+      const poeToken = process.env.POE_TOKEN;
+      if (!poeToken) {
+        return res.status(500).json({ 
+          text: '❌ POE_TOKEN 環境變數未設定，請在 Vercel 中配置' 
+        });
+      }
+
+      // 準備 Poe API 請求
+      const payloadForPoe = {
+        model: model || 'Claude-3-Haiku-20240307',
+        messages: [{ role: 'user', content: message }],
+        stream: false,
+      };
+
+      console.log('🚀 調用 Poe API...', { model: payloadForPoe.model });
+
+      // 調用 Poe API
+      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${poeToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(payloadForPoe),
+      });
+
+      if (!apiResponse.ok) {
+        const errorText = await apiResponse.text();
+        console.error('❌ Poe API 錯誤:', apiResponse.status, errorText);
+        throw new Error(`Poe API 錯誤 (${apiResponse.status}): ${errorText.substring(0, 200)}`);
+      }
+
+      const data = await apiResponse.json();
+      const responseText = data.choices?.[0]?.message?.content || '❌ AI 未提供有效回應';
       
-      // 🔧 暫時返回測試回應，確認連接正常
+      console.log('✅ AI 回應長度:', responseText.length);
+      
       return res.status(200).json({
-        text: `✅ API 連接成功！收到訊息："${message.substring(0, 50)}"`,
-        model: model || 'test-mode',
+        text: responseText,
+        model: payloadForPoe.model,
         timestamp: new Date().toISOString()
       });
       
     } catch (error) {
+      console.error('❌ API 錯誤:', error.message);
       return res.status(500).json({
-        text: `❌ 服務器錯誤：${error.message}`
+        text: `❌ AI 服務暫時不可用：${error.message}`
       });
     }
   }
