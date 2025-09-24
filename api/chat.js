@@ -33,7 +33,7 @@ export default async function handler(req, res) {
       query: messages || [{ role: "user", content: message }],
       bot: targetBot,
       // Poe v2 API 需要 stream 參數
-      stream: true, 
+      stream: false, // 暫時關閉串流以簡化，確保能通
     };
 
     const poeResponse = await fetch('https://api.poe.com/v2/chat/new', {
@@ -41,7 +41,6 @@ export default async function handler(req, res) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${poeApiKey}`,
-        'Accept': 'text/event-stream', // 告訴 Poe 我們要接收串流
       },
       body: JSON.stringify(requestData),
     });
@@ -52,41 +51,14 @@ export default async function handler(req, res) {
       return res.status(poeResponse.status).json({ text: `❌ Poe API 錯誤: ${errorText}` });
     }
     
-    // --- 處理從 Poe 返回的串流數據 ---
-    const reader = poeResponse.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let done = false;
-
-    while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        const chunk = decoder.decode(value, { stream: true });
-        
-        // Poe 的串流數據是 "data: {...}" 格式，每行一個事件
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                const dataStr = line.substring(6);
-                if (dataStr.trim() === '[DONE]') {
-                    done = true;
-                    break;
-                }
-                try {
-                    const data = JSON.parse(dataStr);
-                    // 根據 Poe v2 API 的實際串流格式提取文本
-                    if (data.text) {
-                        fullText += data.text;
-                    }
-                } catch (e) {
-                    // 忽略無法解析的行
-                }
-            }
-        }
-    }
+    // 直接解析 Poe 返回的 JSON 數據
+    const responseData = await poeResponse.json();
     
+    // Poe v2 非串流模式下，回應通常在 responseData.text
+    const replyText = responseData.text || 'AI 未能提供有效回應。';
+
     // 將組合好的完整文字回傳給前端
-    res.status(200).json({ text: fullText });
+    res.status(200).json({ text: replyText });
 
   } catch (error) {
     console.error('Internal Server Error:', error);
