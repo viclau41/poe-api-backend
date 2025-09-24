@@ -2,18 +2,13 @@ export const config = {
   runtime: 'edge',
 };
 
-// 🎨 顏色代碼對照表（方案1）
-const keyMap = {
-  '529': 'green',    // g(103) + r(114) + e(101) + e(101) + n(110) = 529
-  '315': 'red',      // r(114) + e(101) + d(100) = 315
-  '412': 'blue',     // b(98) + l(108) + u(117) + e(101) = 424 (如果需要)
-  '61883889': 'phone', // 您的電話號碼作為備用
-};
+// ?? ????靽風
+const allowedOrigin = 'https://victorlau.myqnapcloud.com';
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': allowedOrigin,  // ??芣??函?蝬脩??賜
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(request) {
@@ -23,20 +18,10 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
+      // ?? 瑼Ｘ隢?靘?
       const origin = request.headers.get('origin');
-      const apiKey = request.headers.get('x-api-key');
-      
-      // 🔒 雙重驗證：域名 OR 有效密鑰
-      const validOrigin = origin?.includes('victorlau.myqnapcloud.com');
-      const validKey = keyMap[apiKey] !== undefined;  // ⭐ 檢查密鑰是否在對照表中
-      
-      if (!validOrigin && !validKey) {
+      if (origin !== allowedOrigin) {
         return new Response('Forbidden', { status: 403 });
-      }
-      
-      // 可選：記錄使用的顏色（調試用）
-      if (validKey) {
-        console.log(`Access granted with color: ${keyMap[apiKey]}`);
       }
       
       const requestData = await request.json();
@@ -51,12 +36,12 @@ export default async function handler(request) {
       }
 
       if (!message) { 
-        throw new Error('請求中缺少 "message"'); 
+        throw new Error('隢?銝剔撩撠?"message"'); 
       }
 
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { 
-        throw new Error('後端 POE_TOKEN 未設定'); 
+        throw new Error('敺垢 POE_TOKEN ?芾身摰?); 
       }
 
       const payloadForPoe = {
@@ -77,12 +62,13 @@ export default async function handler(request) {
 
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
+        throw new Error(`Poe API 隢?憭望? (${apiResponse.status}): ${errorText}`);
       }
 
       const data = await apiResponse.json();
-      const responseText = data.choices?.[0]?.message?.content || '無回應內容';
+      const responseText = data.choices?.[0]?.message?.content || '?∪??摰?;
       
+      // ??蝘駁隤輯岫靽⊥嚗??嗾瘛函???
       return new Response(JSON.stringify({ 
         text: responseText 
       }), {
@@ -94,12 +80,12 @@ export default async function handler(request) {
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
+      return new Response(JSON.stringify({ text: `??隡箸??典?券隤歹?${error.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
   
-  return new Response('方法不被允許', { status: 405, headers: corsHeaders });
+  return new Response('?寞?銝◤?迂', { status: 405, headers: corsHeaders });
 }
