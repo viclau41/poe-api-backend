@@ -1,5 +1,5 @@
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',  // 改為 nodejs
 };
 
 // 密鑰映射系統
