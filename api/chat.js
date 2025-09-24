@@ -1,42 +1,21 @@
 export default async function handler(request) {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Content-Type': 'application/json'
+  };
+
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      }
-    });
+    return new Response(null, { status: 204, headers });
   }
 
   if (request.method === 'POST') {
-    try {
-      const body = await request.json();
-      const message = body.messages?.[0]?.content || body.message || 'Hello';
-      
-      return new Response(JSON.stringify({
-        text: `收到您的訊息：${message}。這是一個測試回應。`
-      }), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-      
-    } catch (error) {
-      return new Response(JSON.stringify({
-        text: '處理請求時發生錯誤：' + error.message
-      }), {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    }
+    // 模擬處理時間
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    return new Response(JSON.stringify({
+      text: '✅ API 基礎測試成功！這是測試回應。'
+    }), { status: 200, headers });
   }
 
-  return new Response('Method not allowed', { status: 405 });
+  return new Response('Method not allowed', { status: 405, headers });
 }
