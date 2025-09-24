@@ -2,13 +2,18 @@ export const config = {
   runtime: 'edge',
 };
 
-// 🔒 加上域名保護
-const allowedOrigin = 'https://victorlau.myqnapcloud.com';
+// 🎨 顏色代碼對照表（方案1）
+const keyMap = {
+  '529': 'green',    // g(103) + r(114) + e(101) + e(101) + n(110) = 529
+  '315': 'red',      // r(114) + e(101) + d(100) = 315
+  '412': 'blue',     // b(98) + l(108) + u(117) + e(101) = 424 (如果需要)
+  '61883889': 'phone', // 您的電話號碼作為備用
+};
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': allowedOrigin,  // 限制只有您的網站能用
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 };
 
 export default async function handler(request) {
@@ -18,10 +23,20 @@ export default async function handler(request) {
 
   if (request.method === 'POST') {
     try {
-      // 🔒 檢查請求來源
       const origin = request.headers.get('origin');
-      if (origin !== allowedOrigin) {
+      const apiKey = request.headers.get('x-api-key');
+      
+      // 🔒 雙重驗證：域名 OR 有效密鑰
+      const validOrigin = origin?.includes('victorlau.myqnapcloud.com');
+      const validKey = keyMap[apiKey] !== undefined;  // ⭐ 檢查密鑰是否在對照表中
+      
+      if (!validOrigin && !validKey) {
         return new Response('Forbidden', { status: 403 });
+      }
+      
+      // 可選：記錄使用的顏色（調試用）
+      if (validKey) {
+        console.log(`Access granted with color: ${keyMap[apiKey]}`);
       }
       
       const requestData = await request.json();
@@ -68,7 +83,6 @@ export default async function handler(request) {
       const data = await apiResponse.json();
       const responseText = data.choices?.[0]?.message?.content || '無回應內容';
       
-      // ✅ 移除調試信息，返回乾淨的回應
       return new Response(JSON.stringify({ 
         text: responseText 
       }), {
