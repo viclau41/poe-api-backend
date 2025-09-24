@@ -1,31 +1,25 @@
-// 🛑 我哋將第一行關於 runtime: 'edge' 的設定成句刪除咗
-// 咁樣 Vercel 就會自動用返最穩定嘅標準 Node.js 環境
-
-// 顏色代碼對照表（暫時唔用）
-const keyMap = {
-  '529': 'green',
-  '315': 'red',
-  '61883889': 'phone',
-};
+// 🛑 最重要嘅一步：我哋已經將頂部嘅 export const config = { runtime: 'edge' }; 成句刪除咗。
+// 咁樣 Vercel 就會自動用返最穩定、最兼容嘅標準 Node.js 環境。
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // 確保呢句永遠存在，解決 CORS 問題
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 };
 
 export default async function handler(request) {
-  // OPTIONS 請求係瀏覽器喺正式 POST 之前嘅「詢問」，我哋要俾佢通過
+  // 處理瀏覽器嘅 OPTIONS 預檢請求
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      // 安全驗證已暫時停用
+      // 安全驗證已暫時停用，任何人都可以訪問
       
       const requestData = await request.json();
       
+      // 兼容兩種請求格式，非常靈活
       let message, model;
       if (requestData.messages) {
         message = requestData.messages[0]?.content;
@@ -36,22 +30,23 @@ export default async function handler(request) {
       }
 
       if (!message) { 
-        throw new Error('請求中缺少 "message"'); 
+        throw new Error('請求中缺少 "message" 內容'); 
       }
 
-      // 喺標準模式下，呢句可以正常運作！
+      // 喺標準模式下，呢句可以完美運作，正確讀取到你嘅 POE_TOKEN
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { 
         // 如果 TOKEN 真係冇設定，我哋會回傳一個清晰嘅錯誤，而唔係超時
-        throw new Error('後端 POE_TOKEN 未在 Vercel 環境變數中設定'); 
+        throw new Error('後端錯誤：POE_TOKEN 未在 Vercel 環境變數中設定'); 
       }
 
       const payloadForPoe = {
-        model: model || 'Claude-3-Haiku-20240307',
+        model: model || 'Claude-3-Haiku-20240307', // 預設模型
         messages: [{ role: 'user', content: message }],
         stream: false,
       };
 
+      // 向 Poe API 發送請求
       const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -62,15 +57,16 @@ export default async function handler(request) {
         body: JSON.stringify(payloadForPoe),
       });
 
+      // 如果 Poe API 返回錯誤，將錯誤訊息傳返俾前端
       if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
         throw new Error(`Poe API 請求失敗 (${apiResponse.status}): ${errorText}`);
       }
 
       const data = await apiResponse.json();
-      const responseText = data.choices?.[0]?.message?.content || '無回應內容';
+      const responseText = data.choices?.[0]?.message?.content || 'Poe API 未返回有效內容';
       
-      // 成功時，回傳答案同埋 CORS 通行證
+      // 成功時，將答案連同 CORS Header 一齊回傳
       return new Response(JSON.stringify({ 
         text: responseText 
       }), {
@@ -82,7 +78,7 @@ export default async function handler(request) {
       });
 
     } catch (error) {
-      // 任何錯誤發生時，都回傳一個清晰嘅錯誤訊息同埋 CORS 通行證
+      // 任何錯誤發生時，都回傳一個清晰嘅 500 錯誤訊息，而唔係超時
       return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
