@@ -1,40 +1,28 @@
-export const config = {
-  runtime: 'edge',
-};
+// 🛑 我哋將第一行關於 runtime: 'edge' 的設定成句刪除咗
+// 咁樣 Vercel 就會自動用返最穩定嘅標準 Node.js 環境
 
-// 🎨 顏色代碼對照表（方案1）- 呢個暫時唔會用到，但保留喺度
+// 顏色代碼對照表（暫時唔用）
 const keyMap = {
-  '529': 'green',    // g(103) + r(114) + e(101) + e(101) + n(110) = 529
-  '315': 'red',      // r(114) + e(101) + d(100) = 315
-  '412': 'blue',     // b(98) + l(108) + u(117) + e(101) = 424 (如果需要)
-  '61883889': 'phone', // 您的電話號碼作為備用
+  '529': 'green',
+  '315': 'red',
+  '61883889': 'phone',
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': '*', // 確保呢句永遠存在，解決 CORS 問題
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 };
 
 export default async function handler(request) {
+  // OPTIONS 請求係瀏覽器喺正式 POST 之前嘅「詢問」，我哋要俾佢通過
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   if (request.method === 'POST') {
     try {
-      // ------------------- 安全驗證已暫時停用 -------------------
-      // const origin = request.headers.get('origin');
-      // const apiKey = request.headers.get('x-api-key');
-      
-      // // 🔒 雙重驗證：域名 OR 有效密鑰
-      // const validOrigin = origin?.includes('victorlau.myqnapcloud.com');
-      // const validKey = keyMap[apiKey] !== undefined;  // ⭐ 檢查密鑰是否在對照表中
-      
-      // if (!validOrigin && !validKey) {
-      //   return new Response('Forbidden', { status: 403 });
-      // }
-      // ---------------------------------------------------------
+      // 安全驗證已暫時停用
       
       const requestData = await request.json();
       
@@ -51,9 +39,11 @@ export default async function handler(request) {
         throw new Error('請求中缺少 "message"'); 
       }
 
+      // 喺標準模式下，呢句可以正常運作！
       const poeToken = process.env.POE_TOKEN;
       if (!poeToken) { 
-        throw new Error('後端 POE_TOKEN 未設定'); 
+        // 如果 TOKEN 真係冇設定，我哋會回傳一個清晰嘅錯誤，而唔係超時
+        throw new Error('後端 POE_TOKEN 未在 Vercel 環境變數中設定'); 
       }
 
       const payloadForPoe = {
@@ -80,6 +70,7 @@ export default async function handler(request) {
       const data = await apiResponse.json();
       const responseText = data.choices?.[0]?.message?.content || '無回應內容';
       
+      // 成功時，回傳答案同埋 CORS 通行證
       return new Response(JSON.stringify({ 
         text: responseText 
       }), {
@@ -91,6 +82,7 @@ export default async function handler(request) {
       });
 
     } catch (error) {
+      // 任何錯誤發生時，都回傳一個清晰嘅錯誤訊息同埋 CORS 通行證
       return new Response(JSON.stringify({ text: `❌ 伺服器內部錯誤：${error.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -98,5 +90,6 @@ export default async function handler(request) {
     }
   }
   
+  // 如果唔係 POST 或 OPTIONS，就話唔允許
   return new Response('方法不被允許', { status: 405, headers: corsHeaders });
 }
