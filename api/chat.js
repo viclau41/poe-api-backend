@@ -13,39 +13,49 @@ export default async function handler(request) {
   if (request.method === 'POST') {
     try {
       const body = await request.json();
-      const message = body.messages?.[0]?.content || body.message || '測試';
-      
-      // 立即響應，不等待外部 API
-      return new Response(JSON.stringify({
-        text: `🤖 Victor AI 助手：收到您的問題「${message}」
+      const message = body.messages && body.messages[0] 
+        ? body.messages[0].content 
+        : (body.message || 'Hello');
 
-基於您的六壬盤式，我建議：
-• 此事宜謹慎行事，觀察時機
-• 近期內可能有轉機出現  
-• 建議多聽取他人意見
+      const poeApiKey = process.env.POE_API_KEY;
+      if (!poeApiKey) {
+        return new Response(JSON.stringify({
+          text: '⚠️ POE_API_KEY not configured in environment variables'
+        }), { status: 500, headers });
+      }
 
-💡 這是基礎分析，如需詳細解讀請聯繫 WhatsApp: 6188 3889
-
-⚠️ 注意：AI 服務正在升級中，暫時提供簡化分析。`
-      }), { 
-        status: 200, 
-        headers 
+      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${poeApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'Claude-3-Haiku',
+          messages: [{ role: 'user', content: message }]
+        })
       });
+
+      if (!apiResponse.ok) {
+        const errorText = await apiResponse.text();
+        throw new Error(`Poe API error (${apiResponse.status}): ${errorText}`);
+      }
+
+      const data = await apiResponse.json();
+      const responseText = data.choices?.[0]?.message?.content || 'No response from AI';
+
+      return new Response(JSON.stringify({
+        text: responseText
+      }), { status: 200, headers });
 
     } catch (error) {
       return new Response(JSON.stringify({
-        text: `❌ 處理錯誤：${error.message}`
-      }), { 
-        status: 500, 
-        headers 
-      });
+        text: `❌ Error: ${error.message}`
+      }), { status: 500, headers });
     }
   }
 
   return new Response(JSON.stringify({
-    text: '✅ Victor AI API 服務正常運行'
-  }), { 
-    status: 200, 
-    headers 
-  });
+    text: '✅ Victor AI API is running with Poe integration'
+  }), { status: 200, headers });
 }
