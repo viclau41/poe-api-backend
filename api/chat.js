@@ -1,8 +1,21 @@
 export default async function handler(req, res) {
+  // 🔒 只檢查域名來源
+  const allowedOrigin = 'https://victorlau.myqnapcloud.com';
+  const origin = req.headers.origin;
+  
+  // 檢查是否來自您的網站
+  const isValidOrigin = origin === allowedOrigin || 
+                       origin === 'https://www.victorlau.myqnapcloud.com';
+  
   // 設置 CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (isValidOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  }
+  
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json');
   
   const { method } = req;
@@ -20,6 +33,14 @@ export default async function handler(req, res) {
   }
   
   if (method === 'POST') {
+    // 🔒 簡單檢查來源
+    if (!isValidOrigin) {
+      console.log('❌ 非法來源:', origin);
+      return res.status(403).json({
+        text: '❌ 訪問被拒絕'
+      });
+    }
+    
     try {
       const { message, model } = req.body || {};
       
@@ -32,24 +53,16 @@ export default async function handler(req, res) {
         return res.status(500).json({ text: '❌ POE_TOKEN 未設定' });
       }
 
-      // 準備 Poe API 請求
       const payloadForPoe = {
         model: model || 'Claude-3-Haiku-20240307',
         messages: [{ role: 'user', content: message }],
         stream: false,
       };
 
-      console.log('🚀 調用 Poe API...', { 
-        model: payloadForPoe.model,
-        messageLength: message.length 
-      });
-
-      // 🔧 創建帶超時的 fetch 控制器
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5分鐘超時
+      const timeoutId = setTimeout(() => controller.abort(), 300000);
 
       try {
-        // 🚀 調用 Poe API 帶超時控制
         const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -65,14 +78,11 @@ export default async function handler(req, res) {
 
         if (!apiResponse.ok) {
           const errorText = await apiResponse.text();
-          console.error('❌ Poe API 錯誤:', apiResponse.status, errorText);
           throw new Error(`Poe API 錯誤 (${apiResponse.status}): ${errorText.substring(0, 200)}`);
         }
 
         const data = await apiResponse.json();
         const responseText = data.choices?.[0]?.message?.content || '❌ AI 未提供有效回應';
-        
-        console.log('✅ AI 回應成功，長度:', responseText.length);
         
         return res.status(200).json({
           text: responseText,
@@ -84,9 +94,8 @@ export default async function handler(req, res) {
         clearTimeout(timeoutId);
         
         if (fetchError.name === 'AbortError') {
-          console.error('❌ Poe API 超時');
           return res.status(408).json({
-            text: '❌ AI 響應超時，請稍後重試。如果是複雜分析，可能需要更長時間。'
+            text: '❌ AI 響應超時，請稍後重試'
           });
         }
         throw fetchError;
