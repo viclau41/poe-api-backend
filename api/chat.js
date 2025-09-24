@@ -20,42 +20,62 @@ export default async function handler(request) {
       const poeApiKey = process.env.POE_API_KEY;
       if (!poeApiKey) {
         return new Response(JSON.stringify({
-          text: '⚠️ POE_API_KEY not configured in environment variables'
+          text: '⚠️ POE_API_KEY not configured'
         }), { status: 500, headers });
       }
 
-      const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${poeApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'Claude-3-Haiku',
-          messages: [{ role: 'user', content: message }]
-        })
-      });
+      // 添加超時控制
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000); // 25秒超時
 
-      if (!apiResponse.ok) {
-        const errorText = await apiResponse.text();
-        throw new Error(`Poe API error (${apiResponse.status}): ${errorText}`);
+      try {
+        const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${poeApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'Claude-3-Haiku',
+            messages: [{ role: 'user', content: message }]
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!apiResponse.ok) {
+          const errorText = await apiResponse.text();
+          throw new Error(`Poe API error (${apiResponse.status}): ${errorText}`);
+        }
+
+        const data = await apiResponse.json();
+        const responseText = data.choices?.[0]?.message?.content || 'No response from AI';
+
+        return new Response(JSON.stringify({
+          text: responseText
+        }), { status: 200, headers });
+
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError.name === 'AbortError') {
+          throw new Error('POE API timeout after 25 seconds');
+        }
+        throw fetchError;
       }
 
-      const data = await apiResponse.json();
-      const responseText = data.choices?.[0]?.message?.content || 'No response from AI';
-
-      return new Response(JSON.stringify({
-        text: responseText
-      }), { status: 200, headers });
-
     } catch (error) {
+      // 詳細錯誤記錄
+      console.error('API Error:', error.message);
+      
       return new Response(JSON.stringify({
-        text: `❌ Error: ${error.message}`
+        text: `❌ AI 服務暫時不可用: ${error.message}`
       }), { status: 500, headers });
     }
   }
 
   return new Response(JSON.stringify({
-    text: '✅ Victor AI API is running with Poe integration'
+    text: '✅ Victor AI API ready'
   }), { status: 200, headers });
 }
