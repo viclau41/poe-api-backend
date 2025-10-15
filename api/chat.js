@@ -104,7 +104,7 @@ export default async function handler(req, res) {
       };
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 保持5分鐘
+      const timeoutId = setTimeout(() => controller.abort(), 600000); // 保持10分鐘
 
       try {
         const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
