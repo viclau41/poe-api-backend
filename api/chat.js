@@ -1,13 +1,46 @@
+// 流量控制配置 - 精簡版
+const LIMITS = {
+  PER_IP_DAY: 30,
+  ADMIN_IPS: ['61.244.126.23']
+};
+
+let usageStats = {
+  date: new Date().toISOString().slice(0, 10),
+  ipUsage: new Map()
+};
+
+function getClientIP(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
+}
+
+function canUse(ip) {
+  // 管理員無限制
+  if (LIMITS.ADMIN_IPS.includes(ip)) return true;
+  
+  // 檢查是否新的一天
+  const today = new Date().toISOString().slice(0, 10);
+  if (usageStats.date !== today) {
+    usageStats = { date: today, ipUsage: new Map() };
+  }
+  
+  const count = usageStats.ipUsage.get(ip) || 0;
+  return count < LIMITS.PER_IP_DAY;
+}
+
+function recordUse(ip) {
+  if (LIMITS.ADMIN_IPS.includes(ip)) return;
+  const count = usageStats.ipUsage.get(ip) || 0;
+  usageStats.ipUsage.set(ip, count + 1);
+}
+
 export default async function handler(req, res) {
-  // 🔒 只檢查域名來源
+  // 🔒 原來的CORS設置
   const allowedOrigin = 'https://victorlau.myqnapcloud.com';
   const origin = req.headers.origin;
   
-  // 檢查是否來自您的網站
   const isValidOrigin = origin === allowedOrigin || 
                        origin === 'https://www.victorlau.myqnapcloud.com';
   
-  // 設置 CORS
   if (isValidOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
@@ -33,11 +66,18 @@ export default async function handler(req, res) {
   }
   
   if (method === 'POST') {
-    // 🔒 簡單檢查來源
-    if (!isValidOrigin) {
-      console.log('❌ 非法來源:', origin);
-      return res.status(403).json({
-        text: '❌ 訪問被拒絕'
+    const clientIP = getClientIP(req);
+    
+    // 🔒 簡單來源檢查
+    const referer = req.headers.referer || '';
+    if (!isValidOrigin && !referer.includes('victorlau.myqnapcloud.com')) {
+      return res.status(403).json({ text: '❌ 訪問被拒絕' });
+    }
+    
+    // 簡單流量檢查
+    if (!canUse(clientIP)) {
+      return res.status(429).json({ 
+        text: '❌ 您今日的諮詢次數已達上限，請明天再來使用' 
       });
     }
     
@@ -53,14 +93,18 @@ export default async function handler(req, res) {
         return res.status(500).json({ text: '❌ POE_TOKEN 未設定' });
       }
 
+      // 記錄使用
+      recordUse(clientIP);
+
+      // 🚀 直接使用原來的邏輯 - 不包裝message
       const payloadForPoe = {
         model: model || 'Claude-3-Haiku-20240307',
-        messages: [{ role: 'user', content: message }],
+        messages: [{ role: 'user', content: message }], // 直接傳原始message
         stream: false,
       };
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000);
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 保持5分鐘
 
       try {
         const apiResponse = await fetch('https://api.poe.com/v1/chat/completions', {
@@ -102,7 +146,6 @@ export default async function handler(req, res) {
       }
       
     } catch (error) {
-      console.error('❌ API 錯誤:', error.message);
       return res.status(500).json({
         text: `❌ AI 服務暫時不可用：${error.message}`
       });
