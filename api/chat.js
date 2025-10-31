@@ -15,12 +15,12 @@ function getClientIP(req) {
 
 function canUse(ip) {
   if (LIMITS.ADMIN_IPS.has(ip)) return true;
-  
+
   const today = new Date().toISOString().slice(0, 10);
   if (usageStats.date !== today) {
     usageStats = { date: today, ipUsage: new Map() };
   }
-  
+
   const count = usageStats.ipUsage.get(ip) || 0;
   return count < LIMITS.PER_IP_DAY;
 }
@@ -32,28 +32,33 @@ function recordUse(ip) {
 }
 
 export default async function handler(req, res) {
-  const allowedOrigin = 'https://victorlau.myqnapcloud.com';
+  // ✅ CORS設置：允許多個域名訪問
+  const allowedOrigins = [
+    'https://victorlau.myqnapcloud.com',
+    'https://www.victorlau.myqnapcloud.com',
+    'https://liuren-payment-victor.vercel.app'
+  ];
+
   const origin = req.headers.origin;
-  
-  const isValidOrigin = origin === allowedOrigin || 
-                       origin === 'https://www.victorlau.myqnapcloud.com';
-  
-  if (isValidOrigin) {
+
+  // 動態設置 CORS 標頭
+  if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
-    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    // 預設允許原有域名
+    res.setHeader('Access-Control-Allow-Origin', 'https://victorlau.myqnapcloud.com');
   }
-  
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json');
-  
+
   const { method } = req;
-  
+
   if (method === 'OPTIONS') {
     return res.status(200).end();
   }
-  
+
   if (method === 'GET') {
     return res.status(200).json({
       status: '✅ Victor API 運行中',
@@ -61,30 +66,32 @@ export default async function handler(req, res) {
       poeToken: process.env.POE_TOKEN ? '✅ 已設定' : '❌ 未設定'
     });
   }
-  
+
   if (method === 'POST') {
     const clientIP = getClientIP(req);
-    
+
     // 🚀 管理員直接跳過所有檢查
     if (!LIMITS.ADMIN_IPS.has(clientIP)) {
       // 普通用戶才檢查來源和流量
+      const isValidOrigin = allowedOrigins.includes(origin);
+
       if (!isValidOrigin) {
         return res.status(403).json({ text: '❌ 訪問被拒絕' });
       }
-      
+
       if (!canUse(clientIP)) {
-        return res.status(429).json({ 
-          text: '❌ 您今日的諮詢次數已達上限，請明天再來使用' 
+        return res.status(429).json({
+          text: '❌ 您今日的諮詢次數已達上限，請明天再來使用'
         });
       }
-      
+
       // 異步記錄使用
       setImmediate(() => recordUse(clientIP));
     }
-    
+
     try {
       const { message, model } = req.body || {};
-      
+
       if (!message) {
         return res.status(400).json({ text: '❌ 缺少 message' });
       }
@@ -124,7 +131,7 @@ export default async function handler(req, res) {
 
         const data = await apiResponse.json();
         const responseText = data.choices?.[0]?.message?.content || '❌ AI 未提供有效回應';
-        
+
         return res.status(200).json({
           text: responseText,
           model: payloadForPoe.model,
@@ -133,7 +140,7 @@ export default async function handler(req, res) {
 
       } catch (fetchError) {
         clearTimeout(timeoutId);
-        
+
         if (fetchError.name === 'AbortError') {
           return res.status(408).json({
             text: '❌ AI 響應超時，請稍後重試'
@@ -141,13 +148,13 @@ export default async function handler(req, res) {
         }
         throw fetchError;
       }
-      
+
     } catch (error) {
       return res.status(500).json({
         text: `❌ AI 服務暫時不可用：${error.message}`
       });
     }
   }
-  
+
   return res.status(405).json({ text: '❌ 方法不允許' });
 }
